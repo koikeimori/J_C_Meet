@@ -3,68 +3,128 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>跨國視訊聊天室</title>
+  <title>跨國多人視訊聊天室</title>
   <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+
   <style>
     body {
       margin: 0;
-      background: #111;
-      color: white;
+      background-color: #0a0a0a;
       font-family: 'Segoe UI', sans-serif;
+      color: white;
       display: flex;
       flex-direction: column;
       align-items: center;
+      height: 100vh;
+      overflow: hidden;
     }
-    #mainVideo {
-      width: 80%;
-      height: 60vh;
-      background: #000;
-      border-radius: 12px;
+
+    h2 {
+      margin: 10px 0;
+      font-weight: 500;
+    }
+
+    /* === 視訊容器 === */
+    #video-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      height: 70vh;
+      padding: 8px;
+      transition: all 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    /* 單個視頻框 */
+    .video-wrapper {
+      position: relative;
+      background: #111;
+      border-radius: 10px;
+      overflow: hidden;
+      flex: 1 1 calc(50% - 10px);
+      max-width: 48%;
+      aspect-ratio: 16/9;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    video, .video-player {
+      width: 100%;
+      height: 100%;
       object-fit: cover;
     }
-    #localVideo {
-      position: absolute;
-      right: 20px;
-      bottom: 20px;
-      width: 180px;
-      height: 130px;
-      border-radius: 8px;
-      object-fit: cover;
-      border: 2px solid #00ff88;
+
+    /* 放大顯示 */
+    .video-wrapper.main {
+      flex: 1 1 100%;
+      max-width: 100%;
+      aspect-ratio: 16/9;
+      z-index: 5;
     }
+
+    /* 側邊小視窗 */
+    .video-wrapper.side {
+      flex: 0 1 25%;
+      max-width: 25%;
+      height: auto;
+      opacity: 0.8;
+    }
+
     #joinSection {
-      margin-top: 20px;
+      margin: 10px 0;
     }
+
     #controls {
       display: none;
+      margin: 10px;
       gap: 10px;
-      margin: 20px;
     }
+
     button {
-      background: #00ff88;
+      background: #00ff99;
       border: none;
-      padding: 10px 16px;
+      padding: 10px 14px;
       border-radius: 6px;
-      cursor: pointer;
       font-weight: bold;
+      cursor: pointer;
       transition: 0.2s;
     }
+
     button:hover {
-      background: #00cc6a;
+      background: #00cc7a;
     }
+
     #status, #error {
-      margin: 10px;
+      margin: 5px;
       font-size: 14px;
     }
+
     #error { color: #ff5555; }
+
+    @media (max-width: 768px) {
+      .video-wrapper {
+        flex: 1 1 48%;
+      }
+      .video-wrapper.side {
+        max-width: 30%;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .video-wrapper {
+        flex: 1 1 100%;
+      }
+    }
   </style>
 </head>
 
 <body>
-  <h2>🌍 跨國即時視訊聊天室</h2>
+  <h2>🌍 跨國多人視訊聊天室</h2>
 
-  <video id="mainVideo" autoplay playsinline></video>
-  <video id="localVideo" autoplay playsinline muted></video>
+  <div id="video-container"></div>
 
   <div id="joinSection">
     <input id="channel" placeholder="輸入頻道名稱" value="testroom" />
@@ -81,31 +141,26 @@
   <div id="error"></div>
 
   <script>
-    const APP_ID = "4c924c6a53374305abf066c12bb2b38c";  // 🔹請填入你的 Agora App ID
-    const TOKEN = "007eJxTYNC7WCu8ySvrRsCWZzpfbrdHCoi+n/S6eh6XS/meC9rzMzUVGEySLY1Mks0STY2NzU2MDUwTk9IMzMySDY2SkoySjC2SPRI/ZzQEMjL8uNvByMgAgSA+C0NuamoJAwMAbuQgYg==";                  // 🔹若啟用 Token 驗證請填入
+    // === Agora 主要設定 ===
+    const APP_ID = "4c924c6a53374305abf066c12bb2b38c"; // ⚠️ 替換成你的 App ID
+    const TOKEN = "007eJxTYNC7WCu8ySvrRsCWZzpfbrdHCoi+n/S6eh6XS/meC9rzMzUVGEySLY1Mks0STY2NzU2MDUwTk9IMzMySDY2SkoySjC2SPRI/ZzQEMjL8uNvByMgAgSA+C0NuamoJAwMAbuQgYg==";
     const UID = null;
 
-    let client, localAudioTrack, localVideoTrack;
+    // === 全域變數 ===
+    let client;
+    let localAudioTrack, localVideoTrack;
     let remoteUsers = {};
+    let mainViewUid = null;
     let isMicMuted = false;
     let isVideoOff = false;
-    let currentMainUid = null;
 
+    const videoContainer = document.getElementById('video-container');
+    const joinSection = document.getElementById('joinSection');
+    const controls = document.getElementById('controls');
     const statusEl = document.getElementById('status');
     const errorEl = document.getElementById('error');
-    const joinBtn = document.getElementById('joinBtn');
-    const joinSection = document.getElementById('joinSection');
 
-    // 初始化檢查
-    window.addEventListener('load', () => {
-      if (typeof AgoraRTC === 'undefined') {
-        errorEl.textContent = '❌ SDK 載入失敗，請檢查網路或 CDN URL。';
-        joinBtn.disabled = true;
-      } else {
-        statusEl.textContent = '✅ SDK 載入完成，準備加入...';
-      }
-    });
-
+    // === 加入頻道 ===
     async function joinChannel() {
       const channel = document.getElementById('channel').value.trim();
       if (!channel) {
@@ -113,83 +168,121 @@
         return;
       }
 
-      statusEl.textContent = '加入頻道中...';
+      statusEl.textContent = '正在加入頻道...';
       errorEl.textContent = '';
-      joinBtn.disabled = true;
 
       try {
         client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
-        // 🔸註冊事件：監聽遠端使用者
+        // 監聽遠端使用者加入
         client.on('user-published', async (user, mediaType) => {
-          console.log('🟢 user-published', user.uid, mediaType);
           await client.subscribe(user, mediaType);
-
-          if (mediaType === 'video') {
-            const remoteVideoTrack = user.videoTrack;
-            remoteVideoTrack.play('mainVideo', { mirror: false, fit: 'cover' });
-            currentMainUid = user.uid;
-            remoteUsers[user.uid] = user;
-          }
-
-          if (mediaType === 'audio') {
-            user.audioTrack && user.audioTrack.play();
-          }
+          if (mediaType === 'video') addRemoteUser(user);
+          if (mediaType === 'audio') user.audioTrack && user.audioTrack.play();
         });
 
-        client.on('user-unpublished', (user) => {
-          console.log('🔴 user-unpublished', user.uid);
-          if (user.uid === currentMainUid) {
-            document.getElementById('mainVideo').srcObject = null;
-          }
-          delete remoteUsers[user.uid];
-        });
+        // 監聽遠端使用者離開
+        client.on('user-unpublished', (user) => removeUser(user.uid));
 
-        // 加入 Agora 頻道
         await client.join(APP_ID, channel, TOKEN, UID);
-        console.log('✅ 已加入頻道：', channel);
-        statusEl.textContent = '獲取媒體設備...';
 
-        // 建立並播放本地視頻
+        // 建立本地音視頻
         [localAudioTrack, localVideoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-        console.log('🎥 本地媒體取得成功');
+        console.log('🎥 已獲取本地攝像頭');
 
-        await localVideoTrack.play('localVideo', { mirror: true, fit: 'contain' });
-        console.log('📺 本地預覽啟動');
+        // ✅ 顯示本地畫面
+        addLocalUser(localVideoTrack);
 
-        // 發佈到 Agora 網絡
         await client.publish([localAudioTrack, localVideoTrack]);
-        console.log('📡 已發佈本地軌道');
-        statusEl.textContent = '連線成功！';
+        console.log('📡 本地流已發佈');
 
+        statusEl.textContent = '✅ 成功加入頻道';
         joinSection.style.display = 'none';
-        document.getElementById('controls').style.display = 'flex';
-      } catch (error) {
-        console.error('❌ joinChannel 錯誤:', error);
-        errorEl.textContent = '連線失敗：' + error.message;
-        statusEl.textContent = '';
-        joinBtn.disabled = false;
+        controls.style.display = 'flex';
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent = '連線失敗：' + err.message;
       }
     }
 
-    async function leaveChannel() {
-      if (localAudioTrack) localAudioTrack.close();
-      if (localVideoTrack) localVideoTrack.close();
+    // === 建立本地畫面 ===
+    function addLocalUser(track) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'video-wrapper';
+      wrapper.id = `user-local`;
 
-      await client.leave();
-      statusEl.textContent = '已離開頻道';
-      joinSection.style.display = 'block';
-      document.getElementById('controls').style.display = 'none';
-      document.getElementById('mainVideo').srcObject = null;
-      document.getElementById('localVideo').srcObject = null;
-      joinBtn.disabled = false;
+      const videoDiv = document.createElement('div');
+      videoDiv.className = 'video-player';
+      videoDiv.id = 'local-player';
+      wrapper.appendChild(videoDiv);
+
+      // 點擊自己畫面可放大
+      wrapper.addEventListener('click', () => focusOnUser('local'));
+
+      videoContainer.appendChild(wrapper);
+
+      // 關鍵：立即播放本地視頻！
+      track.play('local-player', { mirror: true });
+      console.log('✅ 本地畫面已播放');
+      refreshLayout();
     }
 
+    // === 新增遠端畫面 ===
+    function addRemoteUser(user) {
+      if (remoteUsers[user.uid]) return;
+      remoteUsers[user.uid] = user;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'video-wrapper';
+      wrapper.id = `user-${user.uid}`;
+
+      const videoDiv = document.createElement('div');
+      videoDiv.className = 'video-player';
+      videoDiv.id = `player-${user.uid}`;
+      wrapper.appendChild(videoDiv);
+
+      wrapper.addEventListener('click', () => focusOnUser(user.uid));
+      videoContainer.appendChild(wrapper);
+
+      user.videoTrack.play(`player-${user.uid}`);
+      console.log(`🟢 遠端 ${user.uid} 畫面已播放`);
+      refreshLayout();
+    }
+
+    // === 移除使用者畫面 ===
+    function removeUser(uid) {
+      const el = document.getElementById(`user-${uid}`);
+      if (el) el.remove();
+      delete remoteUsers[uid];
+      refreshLayout();
+    }
+
+    // === 點擊放大某位使用者 ===
+    function focusOnUser(uid) {
+      mainViewUid = uid;
+      const all = document.querySelectorAll('.video-wrapper');
+      all.forEach(el => el.classList.remove('main', 'side'));
+      all.forEach(el => {
+        if (el.id === `user-${uid}`) el.classList.add('main');
+        else el.classList.add('side');
+      });
+    }
+
+    // === 動態佈局 ===
+    function refreshLayout() {
+      const all = document.querySelectorAll('.video-wrapper');
+      const count = all.length;
+      all.forEach(el => {
+        el.style.flex = `1 1 calc(${100 / Math.min(count, 3)}% - 10px)`;
+      });
+    }
+
+    // === 控制 ===
     function toggleMic() {
       if (localAudioTrack) {
         isMicMuted = !isMicMuted;
         localAudioTrack.setEnabled(!isMicMuted);
-        statusEl.textContent = isMicMuted ? '麥克風已關' : '麥克風開啟';
+        statusEl.textContent = isMicMuted ? '🎤 麥克風已關' : '🎤 麥克風開啟';
       }
     }
 
@@ -197,9 +290,20 @@
       if (localVideoTrack) {
         isVideoOff = !isVideoOff;
         localVideoTrack.setEnabled(!isVideoOff);
-        statusEl.textContent = isVideoOff ? '攝影機已關' : '攝影機開啟';
-        if (!isVideoOff) localVideoTrack.play('localVideo', { mirror: true });
+        statusEl.textContent = isVideoOff ? '📷 攝影機已關' : '📷 攝影機開啟';
       }
+    }
+
+    async function leaveChannel() {
+      if (localAudioTrack) localAudioTrack.close();
+      if (localVideoTrack) localVideoTrack.close();
+      await client.leave();
+
+      videoContainer.innerHTML = '';
+      remoteUsers = {};
+      joinSection.style.display = 'block';
+      controls.style.display = 'none';
+      statusEl.textContent = '已離開頻道';
     }
   </script>
 </body>
